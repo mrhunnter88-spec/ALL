@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GST Invoice Generator — Restaurants & Outlets</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; margin: 0; background: #f4f6f8; color: #222; }
+  header { background: #12355b; color: #fff; padding: 18px; text-align: center; }
+  main { max-width: 1150px; margin: 20px auto; padding: 0 15px; }
+  .card { background: #fff; border-radius: 10px; padding: 18px; margin-bottom: 18px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  h2 { margin-top: 0; color: #12355b; }
+  label { display: block; font-weight: bold; margin: 10px 0 5px; }
+  input, select, textarea { width: 100%; padding: 9px; border: 1px solid #ccd3da; border-radius: 6px; font-size: 14px; }
+  textarea { min-height: 160px; font-family: monospace; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .col { flex: 1; min-width: 230px; }
+  button { background: #12355b; color: #fff; border: 0; padding: 11px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  button.secondary { background: #5a6b7b; }
+  button.danger { background: #b23b3b; }
+  button:hover { opacity: .9; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+  th, td { border: 1px solid #d7dde3; padding: 8px; text-align: left; }
+  th { background: #eef2f6; }
+  .right { text-align: right; }
+  .status { margin-top: 10px; font-weight: bold; color: #12355b; }
+  .invoice { background: #fff; padding: 25px; border: 1px solid #ccc; }
+  .invoice h1 { margin: 0; color: #12355b; }
+  .invoice-meta { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin: 15px 0; }
+  .totals td { font-weight: bold; }
+  .hidden { display: none; }
+  @media print {
+    body { background: #fff; }
+    .no-print { display: none !important; }
+    .invoice { border: 0; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>GST Invoice Generator</h1>
+  <p>Create GST invoices from text or uploaded invoice images</p>
+</header>
+<main>
+  <section class="card no-print">
+    <h2>1. Upload source</h2>
+    <label>Upload invoice image (JPG / PNG)</label>
+    <input type="file" id="imageFile" accept="image/*" />
+    <label>Or upload a text file (.txt / .csv)</label>
+    <input type="file" id="textFile" accept=".txt,.csv" />
+    <label>Or paste invoice text</label>
+    <textarea id="sourceText" placeholder="Paneer Tikka 2 x 250 = 500&#10;Butter Naan 4 x 40 = 160&#10;GST 5%"></textarea>
+    <div class="row">
+      <div class="col"><button id="ocrBtn">Extract text from image</button></div>
+      <div class="col"><button id="parseBtn" class="secondary">Parse text into invoice</button></div>
+      <div class="col"><button id="clearBtn" class="danger">Clear</button></div>
+    </div>
+    <div id="status" class="status"></div>
+  </section>
+  <section class="card no-print">
+    <h2>2. Restaurant and outlet</h2>
+    <div class="row">
+      <div class="col"><label>Restaurant</label><select id="restaurantSelect"></select></div>
+      <div class="col"><label>Outlet</label><select id="outletSelect"></select></div>
+    </div>
+    <div class="row">
+      <div class="col"><label>Invoice number</label><input id="invoiceNo" /></div>
+      <div class="col"><label>Invoice date</label><input type="date" id="invoiceDate" /></div>
+      <div class="col"><label>Supply type</label><select id="supplyType"><option value="intra">Intra-state — CGST + SGST</option><option value="inter">Inter-state — IGST</option></select></div>
+    </div>
+    <div class="row">
+      <div class="col"><label>Customer name</label><input id="customerName" /></div>
+      <div class="col"><label>Customer GSTIN</label><input id="customerGstin" placeholder="Optional" /></div>
+      <div class="col"><label>Customer address</label><input id="customerAddress" /></div>
+    </div>
+  </section>
+  <section class="card no-print">
+    <h2>3. Invoice items</h2>
+    <table id="itemsTable">
+      <thead><tr><th>Item</th><th>HSN/SAC</th><th class="right">Qty</th><th class="right">Rate</th><th class="right">Discount</th><th class="right">Taxable value</th><th>GST rate</th><th class="right">GST amount</th><th></th></tr></thead>
+      <tbody id="itemsBody"></tbody>
+    </table>
+    <div class="row" style="margin-top:12px">
+      <div class="col"><button id="addItemBtn" class="secondary">Add item</button></div>
+      <div class="col"><button id="generateBtn">Generate GST invoice</button></div>
+      <div class="col"><button id="csvBtn" class="secondary">Download items CSV</button></div>
+    </div>
+  </section>
+  <section id="invoiceSection" class="hidden">
+    <div class="invoice" id="invoicePreview"></div>
+    <div class="row no-print" style="margin-top:15px">
+      <div class="col"><button onclick="window.print()">Print / Save as PDF</button></div>
+      <div class="col"><button class="secondary" onclick="document.getElementById('invoiceSection').classList.add('hidden')">Hide invoice</button></div>
+    </div>
+  </section>
+</main>
+<script>
+const restaurants = [
+  {id:"R001",name:"Spice Garden Restaurant",gstin:"27ABCDE1234F1Z5",address:"12 Food Street, Mumbai, Maharashtra 400001",state:"Maharashtra",stateCode:"27"},
+  {id:"R002",name:"Tandoori Trails",gstin:"07ABCDE5678K1Z2",address:"45 Market Road, New Delhi, Delhi 110001",state:"Delhi",stateCode:"07"},
+  {id:"R003",name:"Coastal Kitchen",gstin:"29ABCDE9012L1Z8",address:"78 Beach Road, Bengaluru, Karnataka 560001",state:"Karnataka",stateCode:"29"}
+];
+const outlets = [];
+for (let i=1;i<=50;i++) outlets.push({id:"OUT-"+String(i).padStart(3,"0"),name:"Outlet "+i,address:"Outlet "+i+" address, India"});
+const restaurantSelect=document.getElementById("restaurantSelect"), outletSelect=document.getElementById("outletSelect"), itemsBody=document.getElementById("itemsBody"), statusEl=document.getElementById("status");
+restaurants.forEach((r,i)=>restaurantSelect.add(new Option(r.name+" — "+r.gstin,i)));
+outlets.forEach((o,i)=>outletSelect.add(new Option(o.id+" — "+o.name,i)));
+document.getElementById("invoiceDate").value=new Date().toISOString().slice(0,10);
+document.getElementById("invoiceNo").value="INV-"+Date.now().toString().slice(-8);
+function setStatus(m,e=false){statusEl.textContent=m;statusEl.style.color=e?"#b23b3b":"#12355b";}
+function addItem(item={}){const tr=document.createElement("tr");tr.innerHTML=`<td><input class="item-name" value="${item.name||""}" /></td><td><input class="item-hsn" value="${item.hsn||""}" /></td><td><input type="number" class="item-qty" value="${item.qty??1}" min="0" step="0.01" /></td><td><input type="number" class="item-rate" value="${item.rate??0}" min="0" step="0.01" /></td><td><input type="number" class="item-discount" value="${item.discount??0}" min="0" step="0.01" /></td><td class="right item-taxable">0.00</td><td><select class="item-gst"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18">18%</option><option value="28">28%</option></select></td><td class="right item-gst-amount">0.00</td><td><button class="danger remove-item">Remove</button></td>`;tr.querySelector(".item-gst").value=String(item.gstRate??5);tr.querySelector(".remove-item").onclick=()=>tr.remove();["item-qty","item-rate","item-discount","item-gst"].forEach(c=>tr.querySelector("."+c).addEventListener("input",recalculate));itemsBody.appendChild(tr);recalculate();}
+function getItems(){return [...itemsBody.querySelectorAll("tr")].map(tr=>{const name=tr.querySelector(".item-name").value.trim(),hsn=tr.querySelector(".item-hsn").value.trim(),qty=parseFloat(tr.querySelector(".item-qty").value)||0,rate=parseFloat(tr.querySelector(".item-rate").value)||0,discount=parseFloat(tr.querySelector(".item-discount").value)||0,gstRate=parseFloat(tr.querySelector(".item-gst").value)||0,taxable=Math.max(0,qty*rate-discount),gstAmount=taxable*gstRate/100;return{name,hsn,qty,rate,discount,gstRate,taxable,gstAmount,element:tr};});}
+function recalculate(){getItems().forEach(i=>{i.element.querySelector(".item-taxable").textContent=i.taxable.toFixed(2);i.element.querySelector(".item-gst-amount").textContent=i.gstAmount.toFixed(2);});}
+function parseSourceText(text){itemsBody.innerHTML="";const lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);let found=0;lines.forEach(line=>{const m1=line.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*[xX*]\s*(?:Rs\.?|₹)?\s*(\d+(?:\.\d+)?)\s*(?:=|total)?\s*(?:Rs\.?|₹)?\s*(\d+(?:\.\d+)?)?$/i);const m2=line.match(/^(.+?)\s*[-|]\s*(?:Rs\.?|₹)?\s*(\d+(?:\.\d+)?)$/);if(m1){addItem({name:m1[1],qty:parseFloat(m1[2]),rate:parseFloat(m1[3])});found++;}else if(m2){addItem({name:m2[1],qty:1,rate:parseFloat(m2[2])});found++;}});if(!found){addItem();setStatus("No item lines detected automatically. Please add or edit items manually.",true);}else setStatus(`Parsed ${found} item line(s). Review quantities, rates, HSN and GST before generating.`);}
+document.getElementById("parseBtn").onclick=()=>parseSourceText(document.getElementById("sourceText").value);
+document.getElementById("addItemBtn").onclick=()=>addItem();
+document.getElementById("clearBtn").onclick=()=>{document.getElementById("sourceText").value="";itemsBody.innerHTML="";document.getElementById("invoiceSection").classList.add("hidden");setStatus("Cleared.");};
+document.getElementById("textFile").onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{document.getElementById("sourceText").value=r.result;parseSourceText(r.result);};r.readAsText(f);};
+document.getElementById("imageFile").onchange=()=>setStatus("Image selected. Click “Extract text from image”.");
+document.getElementById("ocrBtn").onclick=async()=>{const f=document.getElementById("imageFile").files[0];if(!f){setStatus("Please choose an image first.",true);return;}setStatus("Running OCR… this may take a few seconds.");try{const result=await Tesseract.recognize(f,"eng");document.getElementById("sourceText").value=result.data.text;parseSourceText(result.data.text);}catch(err){setStatus("OCR failed: "+err.message,true);}};
+document.getElementById("generateBtn").onclick=()=>{const restaurant=restaurants[restaurantSelect.value],outlet=outlets[outletSelect.value],items=getItems().filter(i=>i.name&&i.qty>0);if(!items.length){setStatus("Add at least one valid item before generating the invoice.",true);return;}const supplyType=document.getElementById("supplyType").value;let taxableTotal=0,gstTotal=0;items.forEach(i=>{taxableTotal+=i.taxable;gstTotal+=i.gstAmount;});const cgst=supplyType==="intra"?gstTotal/2:0,sgst=supplyType==="intra"?gstTotal/2:0,igst=supplyType==="inter"?gstTotal:0,grandTotal=taxableTotal+gstTotal;const itemRows=items.map(i=>`<tr><td>${escapeHtml(i.name)}</td><td>${escapeHtml(i.hsn||"—")}</td><td class="right">${i.qty}</td><td class="right">₹${i.rate.toFixed(2)}</td><td class="right">₹${i.discount.toFixed(2)}</td><td class="right">₹${i.taxable.toFixed(2)}</td><td class="right">${i.gstRate}%</td><td class="right">₹${i.gstAmount.toFixed(2)}</td></tr>`).join("");document.getElementById("invoicePreview").innerHTML=`<h1>${escapeHtml(restaurant.name)}</h1><p><strong>GSTIN:</strong> ${restaurant.gstin}<br />${escapeHtml(restaurant.address)}</p><div class="invoice-meta"><div><strong>Invoice details</strong><br />Invoice No: ${escapeHtml(document.getElementById("invoiceNo").value)}<br />Date: ${escapeHtml(document.getElementById("invoiceDate").value)}<br />Outlet: ${escapeHtml(outlet.id+" — "+outlet.name)}<br />Outlet address: ${escapeHtml(outlet.address)}</div><div><strong>Billed to</strong><br />${escapeHtml(document.getElementById("customerName").value||"Customer")}<br />${escapeHtml(document.getElementById("customerAddress").value||"")}<br />GSTIN: ${escapeHtml(document.getElementById("customerGstin").value||"Unregistered")}</div></div><table><thead><tr><th>Description</th><th>HSN/SAC</th><th class="right">Qty</th><th class="right">Rate</th><th class="right">Discount</th><th class="right">Taxable value</th><th class="right">GST rate</th><th class="right">GST amount</th></tr></thead><tbody>${itemRows}</tbody></table><table class="totals" style="margin-top:15px;width:350px;margin-left:auto"><tr><td>Taxable value</td><td class="right">₹${taxableTotal.toFixed(2)}</td></tr>${supplyType==="intra"?`<tr><td>CGST</td><td class="right">₹${cgst.toFixed(2)}</td></tr><tr><td>SGST</td><td class="right">₹${sgst.toFixed(2)}</td></tr>`:`<tr><td>IGST</td><td class="right">₹${igst.toFixed(2)}</td></tr>`}<tr><td>Total GST</td><td class="right">₹${gstTotal.toFixed(2)}</td></tr><tr><td>Grand total</td><td class="right">₹${grandTotal.toFixed(2)}</td></tr></table><p style="margin-top:25px"><strong>Declaration:</strong> This is a system-generated GST tax invoice. Tax is payable under reverse charge only where applicable.</p><div style="margin-top:60px;display:flex;justify-content:space-between"><div>Customer signature</div><div>Authorised signatory</div></div>`;document.getElementById("invoiceSection").classList.remove("hidden");setStatus("GST invoice generated successfully.");};
+document.getElementById("csvBtn").onclick=()=>{const items=getItems(),rows=[["Item","HSN/SAC","Quantity","Rate","Discount","Taxable value","GST rate","GST amount"]];items.forEach(i=>rows.push([i.name,i.hsn,i.qty,i.rate,i.discount,i.taxable.toFixed(2),i.gstRate,i.gstAmount.toFixed(2)]));const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");const blob=new Blob([csv],{type:"text/csv"});const link=document.createElement("a");link.href=URL.createObjectURL(blob);link.download="gst-invoice-items.csv";link.click();};
+function escapeHtml(v){return String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");}
+addItem();setStatus("Ready. Upload an image, upload text, or paste invoice lines.");
+</script>
+</body>
+</html>
